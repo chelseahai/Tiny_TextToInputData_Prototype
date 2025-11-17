@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 5500",
+    "dev:open": "next dev -p 5500 & sleep 3 && open http://127.0.0.1:5500",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

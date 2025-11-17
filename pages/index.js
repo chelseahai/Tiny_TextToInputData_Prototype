@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Head from "next/head";
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -22,8 +23,14 @@ export default function Home() {
   }
 
   return (
-    <main style={{ maxWidth: 600, margin: "80px auto", fontFamily: "sans-serif" }}>
-      <h2>Garment Logic Analyzer</h2>
+    <>
+      <Head>
+        <title>Garment Logic Analyzer</title>
+        <meta name="description" content="Convert natural language descriptions into garment parameters" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+      </Head>
+      <main style={{ maxWidth: 600, margin: "80px auto", fontFamily: "sans-serif", padding: "0 20px" }}>
+        <h2>Garment Logic Analyzer</h2>
       <form onSubmit={handleSubmit}>
         <textarea
           rows={4}
@@ -79,7 +86,8 @@ export default function Home() {
           {JSON.stringify(result, null, 2)}
         </pre>
       )}
-    </main>
+      </main>
+    </>
   );
 }
 
