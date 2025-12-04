@@ -37,11 +37,11 @@ export default function FabricVisualizer({ parameters }) {
 
     // Map parameters to actual values
     const scale = 0.8 + fit * 0.4; // 0.8x to 1.2x
-    const gridSize = Math.round(4 + mesh * 12); // 4 to 16
+    const gridSize = Math.round(9 * Math.pow(2, mesh * 2)); // 9 to 36 (mesh=0→9, mesh=0.5→18, mesh=1→36)
     const numLayers = Math.round(1 + thickness * 4); // 1 to 5
     const layerSpacing = 0.2;
-    const outlineThickness = 0.5 + airflow * 2.5; // thin to thick (for line rendering)
-    const deformationStrength = (1 - support) * 0.4; // more curves when support is low
+    const outlineThickness = 1 + airflow * 7; // 1 to 8 (airflow=0→1, airflow=0.5→4.0, airflow=1→8.0)
+    const deformationStrength = (1 - support) * 0.8; // 0.8 to 0.0 (support=0→0.8, support=0.5→0.4, support=1→0.0)
 
     // Create scene
     const scene = new THREE.Scene();
@@ -55,8 +55,8 @@ export default function FabricVisualizer({ parameters }) {
       0.1,
       1000
     );
-    // Position camera based on grid size for better framing
-    const cameraDistance = Math.max(8, gridSize * 1.2);
+    // Position camera at fixed distance (independent of grid size)
+    const cameraDistance = 45; // Fixed camera distance
     camera.position.set(cameraDistance, cameraDistance * 0.8, cameraDistance);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
@@ -107,21 +107,37 @@ export default function FabricVisualizer({ parameters }) {
       }
     }
 
-    // Create layers
-    for (let layer = 0; layer < numLayers; layer++) {
-      const layerY = layer * layerSpacing - (numLayers - 1) * layerSpacing * 0.5;
+    // Create layers - each layer's top vertices become the next layer's bottom vertices
+    let currentLayerBottomVertices = null; // Will store top vertices of previous layer
 
+    for (let layer = 0; layer < numLayers; layer++) {
       // Create geometry for all cubes in this layer
       const geometries = [];
       const outlineGeometries = [];
+      const cubeVertices = []; // Store vertices for diagonal lines
+      
+      // Store top vertices of this layer for the next layer
+      const currentLayerTopVertices = [];
 
       for (let z = 0; z < gridHeight; z++) {
         for (let x = 0; x < gridWidth; x++) {
           // Get corner vertices for this cube
-          const v00 = vertexGrid[z * (gridWidth + 1) + x];
-          const v10 = vertexGrid[z * (gridWidth + 1) + x + 1];
-          const v01 = vertexGrid[(z + 1) * (gridWidth + 1) + x];
-          const v11 = vertexGrid[(z + 1) * (gridWidth + 1) + x + 1];
+          let v00, v10, v01, v11;
+          
+          if (layer === 0) {
+            // First layer: use vertex grid for bottom face
+            v00 = vertexGrid[z * (gridWidth + 1) + x];
+            v10 = vertexGrid[z * (gridWidth + 1) + x + 1];
+            v01 = vertexGrid[(z + 1) * (gridWidth + 1) + x];
+            v11 = vertexGrid[(z + 1) * (gridWidth + 1) + x + 1];
+          } else {
+            // Subsequent layers: use previous layer's top vertices as bottom vertices
+            // currentLayerBottomVertices is a 2D array [z][x]
+            v00 = currentLayerBottomVertices[z][x];
+            v10 = currentLayerBottomVertices[z][x + 1];
+            v01 = currentLayerBottomVertices[z + 1][x];
+            v11 = currentLayerBottomVertices[z + 1][x + 1];
+          }
 
           // Create cube geometry from corner positions
           const geometry = new THREE.BufferGeometry();
@@ -129,26 +145,53 @@ export default function FabricVisualizer({ parameters }) {
           const normals = [];
           const indices = [];
 
-          // Apply 3D deformation to cube vertices
-          // Use the Y deformation from vertex grid and apply it to both bottom and top faces
-          // Also add layer-based Y variation for 3D effect
-          const baseY00 = layerY + v00.y;
-          const baseY10 = layerY + v10.y;
-          const baseY01 = layerY + v01.y;
-          const baseY11 = layerY + v11.y;
+          // Calculate bottom face Y positions (from vertex grid or previous layer)
+          const bottomY00 = v00.y;
+          const bottomY10 = v10.y;
+          const bottomY01 = v01.y;
+          const bottomY11 = v11.y;
 
-          // Define 8 vertices of the cube (using deformed corners with 3D Y deformation)
+          // Top face is cubeSize above bottom face
+          const topY00 = bottomY00 + cubeSize;
+          const topY10 = bottomY10 + cubeSize;
+          const topY01 = bottomY01 + cubeSize;
+          const topY11 = bottomY11 + cubeSize;
+
+          // Store top vertices for next layer (initialize on first cube)
+          if (z === 0 && x === 0) {
+            // Initialize array to match vertex grid structure
+            for (let i = 0; i <= gridHeight; i++) {
+              currentLayerTopVertices[i] = [];
+              for (let j = 0; j <= gridWidth; j++) {
+                currentLayerTopVertices[i][j] = null;
+              }
+            }
+          }
+          
+          // Store all four corners (only store if not already set to avoid overwriting shared vertices)
+          if (currentLayerTopVertices[z][x] === null) {
+            currentLayerTopVertices[z][x] = { x: v00.x, y: topY00, z: v00.z };
+          }
+          if (currentLayerTopVertices[z][x + 1] === null) {
+            currentLayerTopVertices[z][x + 1] = { x: v10.x, y: topY10, z: v10.z };
+          }
+          if (currentLayerTopVertices[z + 1][x] === null) {
+            currentLayerTopVertices[z + 1][x] = { x: v01.x, y: topY01, z: v01.z };
+          }
+          currentLayerTopVertices[z + 1][x + 1] = { x: v11.x, y: topY11, z: v11.z };
+
+          // Define 8 vertices of the cube
           const vertices = [
-            // Bottom face (with Y deformation)
-            new THREE.Vector3(v00.x, baseY00 - halfSize, v00.z),
-            new THREE.Vector3(v10.x, baseY10 - halfSize, v10.z),
-            new THREE.Vector3(v11.x, baseY11 - halfSize, v11.z),
-            new THREE.Vector3(v01.x, baseY01 - halfSize, v01.z),
-            // Top face (with Y deformation)
-            new THREE.Vector3(v00.x, baseY00 + halfSize, v00.z),
-            new THREE.Vector3(v10.x, baseY10 + halfSize, v10.z),
-            new THREE.Vector3(v11.x, baseY11 + halfSize, v11.z),
-            new THREE.Vector3(v01.x, baseY01 + halfSize, v01.z),
+            // Bottom face
+            new THREE.Vector3(v00.x, bottomY00, v00.z),
+            new THREE.Vector3(v10.x, bottomY10, v10.z),
+            new THREE.Vector3(v11.x, bottomY11, v11.z),
+            new THREE.Vector3(v01.x, bottomY01, v01.z),
+            // Top face
+            new THREE.Vector3(v00.x, topY00, v00.z),
+            new THREE.Vector3(v10.x, topY10, v10.z),
+            new THREE.Vector3(v11.x, topY11, v11.z),
+            new THREE.Vector3(v01.x, topY01, v01.z),
           ];
 
           // Add vertices to positions array
@@ -223,11 +266,17 @@ export default function FabricVisualizer({ parameters }) {
 
           geometries.push(geometry);
 
+          // Store vertices for diagonal lines
+          cubeVertices.push(vertices);
+
           // Create outline geometry (edges only)
           const outlineGeometry = new THREE.EdgesGeometry(geometry);
           outlineGeometries.push(outlineGeometry);
         }
       }
+
+      // Set top vertices of this layer as bottom vertices for next layer
+      currentLayerBottomVertices = currentLayerTopVertices;
 
       // Create material for cubes (transparent)
       const material = new THREE.MeshStandardMaterial({
@@ -240,8 +289,7 @@ export default function FabricVisualizer({ parameters }) {
       });
 
       // Create outline material
-      // Note: linewidth doesn't work in WebGL, so we use opacity and color intensity
-      // to simulate thickness variation
+      // Note: linewidth doesn't work in WebGL, so we use opacity to simulate thickness variation
       const outlineOpacity = 0.3 + airflow * 0.7; // More airflow (0) = more transparent, Less airflow (1) = more opaque
       const outlineMaterial = new THREE.LineBasicMaterial({
         color: 0x222222,
@@ -263,6 +311,39 @@ export default function FabricVisualizer({ parameters }) {
         const outlineGeom = outlineGeometries[idx];
         const outline = new THREE.LineSegments(outlineGeom, outlineMaterial);
         layerGroup.add(outline);
+
+        // Add diagonal lines inside cube based on airflow
+        const vertices = cubeVertices[idx];
+        let numDiagonals = 0;
+        
+        if (airflow >= 0.33 && airflow < 0.66) {
+          numDiagonals = 2; // 2 diagonals forming X pattern
+        } else if (airflow >= 0.66) {
+          numDiagonals = 4; // All 4 space diagonals
+        }
+        
+        if (numDiagonals > 0) {
+          // Cube vertices: 0=bottom-front-left, 1=bottom-front-right, 2=bottom-back-right, 3=bottom-back-left
+          //               4=top-front-left, 5=top-front-right, 6=top-back-right, 7=top-back-left
+          
+          const diagonalPairs = [
+            [0, 6], // bottom-front-left to top-back-right
+            [1, 7], // bottom-front-right to top-back-left
+            [2, 4], // bottom-back-right to top-front-left
+            [3, 5], // bottom-back-left to top-front-right
+          ];
+          
+          // Create diagonal lines
+          for (let i = 0; i < numDiagonals; i++) {
+            const [startIdx, endIdx] = diagonalPairs[i];
+            const diagonalGeometry = new THREE.BufferGeometry().setFromPoints([
+              vertices[startIdx],
+              vertices[endIdx],
+            ]);
+            const diagonalLine = new THREE.Line(diagonalGeometry, outlineMaterial);
+            layerGroup.add(diagonalLine);
+          }
+        }
       });
 
       scene.add(layerGroup);
