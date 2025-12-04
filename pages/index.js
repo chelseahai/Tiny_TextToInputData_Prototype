@@ -77,21 +77,38 @@ export default function Home() {
           alignItems: "center",
           background: "#fff"
         }}>
-          {loading && (
+          {loading ? (
             <div style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              fontSize: "14px",
-              fontWeight: 300,
-              color: "#999",
-              zIndex: 10
+              width: "100%",
+              height: "100%",
+              display: "flex",
+              justifyContent: "center",
+              alignItems: "center"
             }}>
-              Analyzing...
+              {/* Skeleton Grid */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, 1fr)",
+                gap: "12px",
+                width: "200px",
+                height: "200px"
+              }}>
+                {Array.from({ length: 16 }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      background: "#f0f0f0",
+                      borderRadius: "2px",
+                      animation: "pulse 1.5s ease-in-out infinite",
+                      animationDelay: `${i * 0.05}s`
+                    }}
+                  />
+                ))}
+              </div>
             </div>
-          )}
-          {result ? (
+          ) : result ? (
             <>
               <div style={{
                 width: "100%",
@@ -186,283 +203,84 @@ export default function Home() {
 
           {/* Parameter Sliders */}
           <div style={{ marginTop: "40px", paddingTop: "40px" }}>
-            {result ? (
-              <>
-                {/* FIT */}
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    marginBottom: "4px",
-                    fontSize: "11px",
-                    fontWeight: 300,
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                    color: "#000"
-                  }}>
-                    <span style={{ width: "90px" }}>FIT</span>
+            {/* Helper function to render a slider */}
+            {(() => {
+              const renderSlider = (label, value, leftLabel, rightLabel) => {
+                // If result is null or value is undefined/null, use 0 as default
+                // Otherwise use the actual value
+                let displayValue = 0; // Default to 0
+                if (result !== null && value !== undefined && value !== null) {
+                  displayValue = value; // Use actual value when result exists
+                }
+                const position = `calc(80px + ${displayValue * 100}% * (100% - 170px) / 100%)`;
+                
+                return (
+                  <div style={{ marginBottom: "16px" }}>
                     <div style={{ 
-                      flex: 1, 
-                      position: "relative", 
-                      height: "20px",
-                      display: "flex",
-                      alignItems: "center",
-                      margin: "0 20px",
-                      paddingLeft: "80px",
-                      paddingRight: "90px"
-                    }}>
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>Close</span>
-                      <div style={{
-                        position: "absolute",
-                        left: "80px",
-                        right: "90px",
-                        height: "1px",
-                        background: "#e0e0e0"
-                      }} />
-                      <div style={{
-                        position: "absolute",
-                        left: `calc(80px + ${(result.Fit ?? 0) * 100}% * (100% - 170px) / 100%)`,
-                        width: "1px",
-                        height: "16px",
-                        background: "#000",
-                        transform: "translateX(-50%)"
-                      }} />
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>Loose</span>
-                    </div>
-                    <span style={{ 
-                      width: "50px", 
-                      textAlign: "right",
-                      fontSize: "12px",
+                      display: "flex", 
+                      alignItems: "center", 
+                      marginBottom: "4px",
+                      fontSize: "11px",
                       fontWeight: 300,
-                      color: "#000",
-                      marginLeft: "12px"
+                      letterSpacing: "1px",
+                      textTransform: "uppercase",
+                      color: "#000"
                     }}>
-                      {(result.Fit ?? 0).toFixed(2)}
-                    </span>
+                      <span style={{ width: "90px" }}>{label}</span>
+                      <div style={{ 
+                        flex: 1, 
+                        position: "relative", 
+                        height: "20px",
+                        display: "flex",
+                        alignItems: "center",
+                        margin: "0 20px",
+                        paddingLeft: "80px",
+                        paddingRight: "90px"
+                      }}>
+                        <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>{leftLabel}</span>
+                        <div style={{
+                          position: "absolute",
+                          left: "80px",
+                          right: "90px",
+                          height: "1px",
+                          background: "#e0e0e0"
+                        }} />
+                        <div style={{
+                          position: "absolute",
+                          left: position,
+                          width: "1px",
+                          height: "16px",
+                          background: "#000",
+                          transform: "translateX(-50%)",
+                          transition: "left 0.8s ease-out"
+                        }} />
+                        <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>{rightLabel}</span>
+                      </div>
+                      <span style={{ 
+                        width: "50px", 
+                        textAlign: "right",
+                        fontSize: "12px",
+                        fontWeight: 300,
+                        color: "#000",
+                        marginLeft: "12px"
+                      }}>
+                        {displayValue.toFixed(2)}
+                      </span>
+                    </div>
                   </div>
-                </div>
+                );
+              };
 
-                {/* MESH */}
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    marginBottom: "4px",
-                    fontSize: "11px",
-                    fontWeight: 300,
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                    color: "#000"
-                  }}>
-                    <span style={{ width: "90px" }}>MESH</span>
-                    <div style={{ 
-                      flex: 1, 
-                      position: "relative", 
-                      height: "20px",
-                      display: "flex",
-                      alignItems: "center",
-                      margin: "0 20px",
-                      paddingLeft: "80px",
-                      paddingRight: "90px"
-                    }}>
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>Open</span>
-                      <div style={{
-                        position: "absolute",
-                        left: "80px",
-                        right: "90px",
-                        height: "1px",
-                        background: "#e0e0e0"
-                      }} />
-                      <div style={{
-                        position: "absolute",
-                        left: `calc(80px + ${(result.Mesh ?? 0) * 100}% * (100% - 170px) / 100%)`,
-                        width: "1px",
-                        height: "16px",
-                        background: "#000",
-                        transform: "translateX(-50%)"
-                      }} />
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>Fine</span>
-                    </div>
-                    <span style={{ 
-                      width: "50px", 
-                      textAlign: "right",
-                      fontSize: "12px",
-                      fontWeight: 300,
-                      color: "#000",
-                      marginLeft: "12px"
-                    }}>
-                      {(result.Mesh ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* THICKNESS */}
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    marginBottom: "4px",
-                    fontSize: "11px",
-                    fontWeight: 300,
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                    color: "#000"
-                  }}>
-                    <span style={{ width: "90px" }}>THICKNESS</span>
-                    <div style={{ 
-                      flex: 1, 
-                      position: "relative", 
-                      height: "20px",
-                      display: "flex",
-                      alignItems: "center",
-                      margin: "0 20px",
-                      paddingLeft: "80px",
-                      paddingRight: "90px"
-                    }}>
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>Thin</span>
-                      <div style={{
-                        position: "absolute",
-                        left: "80px",
-                        right: "90px",
-                        height: "1px",
-                        background: "#e0e0e0"
-                      }} />
-                      <div style={{
-                        position: "absolute",
-                        left: `calc(80px + ${(result.Thickness ?? 0) * 100}% * (100% - 170px) / 100%)`,
-                        width: "1px",
-                        height: "16px",
-                        background: "#000",
-                        transform: "translateX(-50%)"
-                      }} />
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>Thick</span>
-                    </div>
-                    <span style={{ 
-                      width: "50px", 
-                      textAlign: "right",
-                      fontSize: "12px",
-                      fontWeight: 300,
-                      color: "#000",
-                      marginLeft: "12px"
-                    }}>
-                      {(result.Thickness ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* AIRFLOW */}
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    marginBottom: "4px",
-                    fontSize: "11px",
-                    fontWeight: 300,
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                    color: "#000"
-                  }}>
-                    <span style={{ width: "90px" }}>AIRFLOW</span>
-                    <div style={{ 
-                      flex: 1, 
-                      position: "relative", 
-                      height: "20px",
-                      display: "flex",
-                      alignItems: "center",
-                      margin: "0 20px",
-                      paddingLeft: "80px",
-                      paddingRight: "90px"
-                    }}>
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>Breathable</span>
-                      <div style={{
-                        position: "absolute",
-                        left: "80px",
-                        right: "90px",
-                        height: "1px",
-                        background: "#e0e0e0"
-                      }} />
-                      <div style={{
-                        position: "absolute",
-                        left: `calc(80px + ${(result.Airflow ?? 0) * 100}% * (100% - 170px) / 100%)`,
-                        width: "1px",
-                        height: "16px",
-                        background: "#000",
-                        transform: "translateX(-50%)"
-                      }} />
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>Unbreathable</span>
-                    </div>
-                    <span style={{ 
-                      width: "50px", 
-                      textAlign: "right",
-                      fontSize: "12px",
-                      fontWeight: 300,
-                      color: "#000",
-                      marginLeft: "12px"
-                    }}>
-                      {(result.Airflow ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                {/* SUPPORT */}
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ 
-                    display: "flex", 
-                    alignItems: "center", 
-                    marginBottom: "4px",
-                    fontSize: "11px",
-                    fontWeight: 300,
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                    color: "#000"
-                  }}>
-                    <span style={{ width: "90px" }}>SUPPORT</span>
-                    <div style={{ 
-                      flex: 1, 
-                      position: "relative", 
-                      height: "20px",
-                      display: "flex",
-                      alignItems: "center",
-                      margin: "0 20px",
-                      paddingLeft: "80px",
-                      paddingRight: "90px"
-                    }}>
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", left: "0", whiteSpace: "nowrap" }}>Soft</span>
-                      <div style={{
-                        position: "absolute",
-                        left: "80px",
-                        right: "90px",
-                        height: "1px",
-                        background: "#e0e0e0"
-                      }} />
-                      <div style={{
-                        position: "absolute",
-                        left: `calc(80px + ${(result.Support ?? 0) * 100}% * (100% - 170px) / 100%)`,
-                        width: "1px",
-                        height: "16px",
-                        background: "#000",
-                        transform: "translateX(-50%)"
-                      }} />
-                      <span style={{ fontSize: "10px", color: "#999", position: "absolute", right: "0", whiteSpace: "nowrap" }}>Rigid</span>
-                    </div>
-                    <span style={{ 
-                      width: "50px", 
-                      textAlign: "right",
-                      fontSize: "12px",
-                      fontWeight: 300,
-                      color: "#000",
-                      marginLeft: "12px"
-                    }}>
-                      {(result.Support ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div style={{ fontSize: "12px", color: "#999", fontWeight: 300 }}>
-                Enter a description to see parameters
-              </div>
-            )}
+              return (
+                <>
+                  {renderSlider("FIT", result?.Fit, "Close", "Loose")}
+                  {renderSlider("MESH", result?.Mesh, "Open", "Fine")}
+                  {renderSlider("THICKNESS", result?.Thickness, "Thin", "Thick")}
+                  {renderSlider("AIRFLOW", result?.Airflow, "Breathable", "Unbreathable")}
+                  {renderSlider("SUPPORT", result?.Support, "Soft", "Rigid")}
+                </>
+              );
+            })()}
           </div>
         </div>
       </main>
