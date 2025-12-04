@@ -336,9 +336,11 @@ export default function FabricVisualizer({ parameters }) {
           // Create diagonal lines
           for (let i = 0; i < numDiagonals; i++) {
             const [startIdx, endIdx] = diagonalPairs[i];
+            const start = vertices[startIdx];
+            const end = vertices[endIdx];
             const diagonalGeometry = new THREE.BufferGeometry().setFromPoints([
-              vertices[startIdx],
-              vertices[endIdx],
+              new THREE.Vector3(start.x, start.y, start.z),
+              new THREE.Vector3(end.x, end.y, end.z),
             ]);
             const diagonalLine = new THREE.Line(diagonalGeometry, outlineMaterial);
             layerGroup.add(diagonalLine);
