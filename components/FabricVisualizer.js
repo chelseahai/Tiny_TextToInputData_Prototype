@@ -45,7 +45,7 @@ export default function FabricVisualizer({ parameters }) {
 
     // Create scene
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xf5f5f5);
+    scene.background = null; // Transparent background
     sceneRef.current = scene;
 
     // Camera
@@ -62,7 +62,7 @@ export default function FabricVisualizer({ parameters }) {
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     containerRef.current.appendChild(renderer.domElement);
@@ -457,11 +457,11 @@ export default function FabricVisualizer({ parameters }) {
       ref={containerRef}
       style={{
         width: "100%",
-        height: "500px",
-        border: "1px solid #ddd",
-        borderRadius: "8px",
+        maxWidth: "100%",
+        height: "100%",
+        maxHeight: "100%",
         overflow: "hidden",
-        background: "#f5f5f5",
+        background: "transparent",
       }}
     />
   );
