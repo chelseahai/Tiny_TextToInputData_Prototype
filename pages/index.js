@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Head from "next/head";
+import FabricVisualizer from "../components/FabricVisualizer";
 
 export default function Home() {
   const [input, setInput] = useState("");
@@ -75,16 +76,38 @@ export default function Home() {
       </div>
       {loading && <p>Analyzing...</p>}
       {result && (
-        <pre
-          style={{
-            marginTop: 0,
-            background: "#f4f4f4",
-            padding: 12,
-            borderRadius: 8,
-          }}
-        >
-          {JSON.stringify(result, null, 2)}
-        </pre>
+        <>
+          <div
+            style={{
+              marginTop: 20,
+              background: "#fff",
+              padding: 12,
+              borderRadius: 8,
+              border: "1px solid #ddd",
+              marginBottom: 12,
+            }}
+          >
+            <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14, fontWeight: 600 }}>
+              Current Parameters:
+            </h3>
+            <div style={{ fontSize: 13, lineHeight: 1.8 }}>
+              <div><strong>Fit:</strong> {result.Fit?.toFixed(2) ?? "N/A"}</div>
+              <div><strong>Mesh:</strong> {result.Mesh?.toFixed(2) ?? "N/A"}</div>
+              <div><strong>Thickness:</strong> {result.Thickness?.toFixed(2) ?? "N/A"}</div>
+              <div><strong>Airflow:</strong> {result.Airflow?.toFixed(2) ?? "N/A"}</div>
+              <div><strong>Support:</strong> {result.Support?.toFixed(2) ?? "N/A"}</div>
+            </div>
+          </div>
+          <div style={{ marginTop: 20 }}>
+            <h3 style={{ marginBottom: 12, fontSize: 16, fontWeight: 600 }}>
+              3D Fabric Visualization
+            </h3>
+            <p style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
+              Drag to rotate • Scroll to zoom • Cubes are connected with shared vertices
+            </p>
+            <FabricVisualizer parameters={result} />
+          </div>
+        </>
       )}
       </main>
     </>
