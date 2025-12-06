@@ -14,15 +14,29 @@ export default function Home() {
     setLoading(true);
     setResult(null);
 
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input }),
-    });
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: input }),
+      });
 
-    const data = await res.json();
-    setResult(data);
-    setLoading(false);
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+        console.error("API Error:", errorData);
+        alert(`Error: ${errorData.error || "Failed to analyze"}`);
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+      setResult(data);
+    } catch (error) {
+      console.error("Fetch Error:", error);
+      alert(`Error: ${error.message || "Failed to connect to server"}`);
+    } finally {
+      setLoading(false);
+    }
   }
 
   // Keyboard shortcut: Enter to analyze
@@ -35,15 +49,29 @@ export default function Home() {
         setLoading(true);
         setResult(null);
 
-        const res = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: input }),
-        });
+        try {
+          const res = await fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: input }),
+          });
 
-        const data = await res.json();
-        setResult(data);
-        setLoading(false);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+            console.error("API Error:", errorData);
+            alert(`Error: ${errorData.error || "Failed to analyze"}`);
+            setLoading(false);
+            return;
+          }
+
+          const data = await res.json();
+          setResult(data);
+        } catch (error) {
+          console.error("Fetch Error:", error);
+          alert(`Error: ${error.message || "Failed to connect to server"}`);
+        } finally {
+          setLoading(false);
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);

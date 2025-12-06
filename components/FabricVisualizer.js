@@ -109,12 +109,20 @@ export default function FabricVisualizer({ parameters }) {
 
     // Create layers - each layer's top vertices become the next layer's bottom vertices
     let currentLayerBottomVertices = null; // Will store top vertices of previous layer
+    
+    // Store all geometries and their original positions for animation
+    const allGeometries = [];
+    const originalPositions = [];
+    const geometryToOutlineMap = new Map(); // Map main geometry index to outline LineSegments object
+    const geometryToDiagonalsMap = new Map(); // Map main geometry index to diagonal Line objects array
+    const geometryToCubeVerticesMap = new Map(); // Map main geometry index to original cube vertices
 
     for (let layer = 0; layer < numLayers; layer++) {
       // Create geometry for all cubes in this layer
       const geometries = [];
       const outlineGeometries = [];
       const cubeVertices = []; // Store vertices for diagonal lines
+      const cubePositions = []; // Store cube grid positions (x, z) for color gradient (per layer)
       
       // Store top vertices of this layer for the next layer
       const currentLayerTopVertices = [];
@@ -265,6 +273,16 @@ export default function FabricVisualizer({ parameters }) {
           geometry.computeBoundingSphere();
 
           geometries.push(geometry);
+          
+          // Store cube position for color gradient
+          cubePositions.push({ x, z, layer });
+          
+          // Store geometry and original positions for animation
+          const geomIndex = allGeometries.length;
+          allGeometries.push(geometry);
+          // Store a deep copy of positions array
+          originalPositions.push(new Float32Array(positions));
+          geometryToCubeVerticesMap.set(geomIndex, vertices); // Store original vertices for diagonal lines
 
           // Store vertices for diagonal lines
           cubeVertices.push(vertices);
@@ -278,15 +296,29 @@ export default function FabricVisualizer({ parameters }) {
       // Set top vertices of this layer as bottom vertices for next layer
       currentLayerBottomVertices = currentLayerTopVertices;
 
-      // Create material for cubes (transparent)
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x888888,
-        metalness: 0.3,
-        roughness: 0.7,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.05,
-      });
+      // Helper function to calculate color based on position for gradient
+      // Uses (x + z + layer) so adjacent cubes in any dimension have the same hue
+      const getCubeColor = (x, z, layer, gridWidth, gridHeight, numLayers) => {
+        // Give layer more weight so it has visible impact
+        // x and z typically range 0-8 or more, layer is usually 0-4, so we weight layer more
+        const layerWeight = Math.max(gridWidth, gridHeight); // Match the max of x or z range
+        const sum = x + z + (layer * layerWeight);
+        
+        // Multiply by factor to create larger hue jumps between adjacent cubes
+        const sumMultiplier = 10; // Creates more noticeable color differences
+        const adjustedSum = sum * sumMultiplier;
+        
+        // Use modulo to wrap around the hue range, creating distinct color bands
+        // This way the multiplier actually creates larger jumps
+        const hue = adjustedSum % 360;
+        const saturation = 0.6; // Moderate saturation
+        const lightness = 0.5; // Medium lightness
+        
+        // Convert HSL to RGB
+        const color = new THREE.Color();
+        color.setHSL(hue / 360, saturation, lightness);
+        return color;
+      };
 
       // Create outline material
       // Note: linewidth doesn't work in WebGL, so we use opacity to simulate thickness variation
@@ -303,14 +335,33 @@ export default function FabricVisualizer({ parameters }) {
 
       // Create meshes and outlines for each cube
       geometries.forEach((geom, idx) => {
-        // Create mesh
-        const mesh = new THREE.Mesh(geom, material);
+        // Create unique material for each cube with gradient color
+        const cubePos = cubePositions[idx];
+        const cubeColor = getCubeColor(cubePos.x, cubePos.z, cubePos.layer, gridWidth, gridHeight, numLayers);
+        
+        const cubeMaterial = new THREE.MeshStandardMaterial({
+          color: cubeColor,
+          metalness: 0.3,
+          roughness: 0.7,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.05,
+        });
+        
+        // Create mesh with unique colored material
+        const mesh = new THREE.Mesh(geom, cubeMaterial);
         layerGroup.add(mesh);
 
         // Create outline
         const outlineGeom = outlineGeometries[idx];
         const outline = new THREE.LineSegments(outlineGeom, outlineMaterial);
         layerGroup.add(outline);
+        
+        // Store outline reference for animation (find the geometry index in allGeometries)
+        const geomIndex = allGeometries.indexOf(geom);
+        if (geomIndex !== -1) {
+          geometryToOutlineMap.set(geomIndex, outline);
+        }
 
         // Add diagonal lines inside cube based on airflow
         const vertices = cubeVertices[idx];
@@ -322,6 +373,7 @@ export default function FabricVisualizer({ parameters }) {
           numDiagonals = 4; // All 4 space diagonals
         }
         
+        const diagonalLines = [];
         if (numDiagonals > 0) {
           // Cube vertices: 0=bottom-front-left, 1=bottom-front-right, 2=bottom-back-right, 3=bottom-back-left
           //               4=top-front-left, 5=top-front-right, 6=top-back-right, 7=top-back-left
@@ -344,7 +396,13 @@ export default function FabricVisualizer({ parameters }) {
             ]);
             const diagonalLine = new THREE.Line(diagonalGeometry, outlineMaterial);
             layerGroup.add(diagonalLine);
+            diagonalLines.push(diagonalLine);
           }
+        }
+        
+        // Store diagonal lines reference for animation
+        if (geomIndex !== -1 && diagonalLines.length > 0) {
+          geometryToDiagonalsMap.set(geomIndex, diagonalLines);
         }
       });
 
@@ -397,8 +455,130 @@ export default function FabricVisualizer({ parameters }) {
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
 
     // Animation loop
+    let time = 0;
     const animate = () => {
       animationFrameRef.current = requestAnimationFrame(animate);
+      time += 0.01; // Increment time for animation
+
+      // Apply subtle idle animation to fabric
+      // Gentle wave effect that makes the fabric appear to breathe
+      const animationStrength = 0.75; // 1.5x stronger (was 0.5)
+      const waveSpeed = 2.0; // Faster wave speed
+      
+      // Only animate if we have geometries
+      if (allGeometries.length === 0 || originalPositions.length === 0) {
+        // Apply rotation
+        scene.rotation.y = rotationY;
+        scene.rotation.x = rotationX;
+
+        // Apply zoom by adjusting camera distance from origin
+        const newDistance = initialCameraDistance / zoomLevel;
+        const direction = new THREE.Vector3(1, 0.8, 1).normalize();
+        camera.position.copy(direction.multiplyScalar(newDistance));
+        camera.lookAt(0, 0, 0);
+
+        renderer.render(scene, camera);
+        return;
+      }
+      
+      allGeometries.forEach((geometry, geomIdx) => {
+        if (!geometry || !geometry.attributes || !geometry.attributes.position) {
+          return;
+        }
+        
+        const originalPos = originalPositions[geomIdx];
+        if (!originalPos) {
+          return;
+        }
+        
+        const positions = geometry.attributes.position.array;
+        const vertexCount = originalPos.length / 3;
+        
+        // Helper function to calculate wave offset for a given position
+        const getWaveOffset = (x, y, z) => {
+          const wave1 = Math.sin(x * 0.3 + time * waveSpeed) * Math.cos(z * 0.25 + time * waveSpeed * 0.7);
+          const wave2 = Math.cos(x * 0.2 + time * waveSpeed * 0.5) * Math.sin(z * 0.35 + time * waveSpeed * 1.2);
+          const wave3 = Math.sin((x + z) * 0.15 + time * waveSpeed * 0.8);
+          const yOffset = (wave1 * 0.4 + wave2 * 0.3 + wave3 * 0.3) * animationStrength;
+          return {
+            x: x + wave1 * animationStrength * 0.1,
+            y: y + yOffset,
+            z: z + wave2 * animationStrength * 0.1
+          };
+        };
+        
+        // Get the position attribute array directly
+        const positionAttribute = geometry.attributes.position;
+        if (!positionAttribute || !positionAttribute.array) {
+          return;
+        }
+        
+        const positionArray = positionAttribute.array;
+        
+        for (let i = 0; i < vertexCount; i++) {
+          const baseX = originalPos[i * 3];
+          const baseY = originalPos[i * 3 + 1];
+          const baseZ = originalPos[i * 3 + 2];
+          
+          // Calculate animated position
+          const animated = getWaveOffset(baseX, baseY, baseZ);
+          
+          // Update position directly in the array
+          positionArray[i * 3] = animated.x;
+          positionArray[i * 3 + 1] = animated.y;
+          positionArray[i * 3 + 2] = animated.z;
+        }
+        
+        positionAttribute.needsUpdate = true;
+        geometry.computeVertexNormals(); // Recalculate normals for proper lighting
+        
+        // Update outline geometry (recreate EdgesGeometry from animated geometry)
+        // Note: We recreate every frame to match the animation speed of the cubes
+        const outline = geometryToOutlineMap.get(geomIdx);
+        if (outline) {
+          // Dispose old geometry
+          const oldGeometry = outline.geometry;
+          // Create new EdgesGeometry from animated geometry
+          outline.geometry = new THREE.EdgesGeometry(geometry);
+          // Dispose old geometry after creating new one to avoid flicker
+          oldGeometry.dispose();
+        }
+        
+        // Update diagonal lines - update positions directly instead of recreating
+        const diagonalLines = geometryToDiagonalsMap.get(geomIdx);
+        if (diagonalLines) {
+          const originalVertices = geometryToCubeVerticesMap.get(geomIdx);
+          if (originalVertices) {
+            // Cube vertices: 0=bottom-front-left, 1=bottom-front-right, 2=bottom-back-right, 3=bottom-back-left
+            //               4=top-front-left, 5=top-front-right, 6=top-back-right, 7=top-back-left
+            const diagonalPairs = [
+              [0, 6], [1, 7], [2, 4], [3, 5]
+            ];
+            
+            diagonalLines.forEach((line, lineIdx) => {
+              const [startIdx, endIdx] = diagonalPairs[lineIdx];
+              const origStart = originalVertices[startIdx];
+              const origEnd = originalVertices[endIdx];
+              
+              // Calculate animated positions
+              const animatedStart = getWaveOffset(origStart.x, origStart.y, origStart.z);
+              const animatedEnd = getWaveOffset(origEnd.x, origEnd.y, origEnd.z);
+              
+              // Update position array directly instead of recreating geometry
+              const linePositions = line.geometry.attributes.position;
+              if (linePositions) {
+                linePositions.array[0] = animatedStart.x;
+                linePositions.array[1] = animatedStart.y;
+                linePositions.array[2] = animatedStart.z;
+                linePositions.array[3] = animatedEnd.x;
+                linePositions.array[4] = animatedEnd.y;
+                linePositions.array[5] = animatedEnd.z;
+                linePositions.needsUpdate = true;
+              }
+            });
+          }
+        }
+      });
 
       // Apply rotation
       scene.rotation.y = rotationY;
