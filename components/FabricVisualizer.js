@@ -9,7 +9,43 @@ export default function FabricVisualizer({ parameters }) {
   const animationFrameRef = useRef(null);
 
   useEffect(() => {
-    if (!containerRef.current || !parameters) return;
+    if (!containerRef.current || !parameters || typeof window === 'undefined') return;
+    
+    // Ensure THREE is available
+    if (!THREE || !THREE.WebGLRenderer) {
+      console.error('Three.js is not properly loaded');
+      return;
+    }
+
+    // Cancel any existing animation frame first
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    // Cleanup previous scene and renderer
+    if (rendererRef.current) {
+      // Remove event listeners
+      const renderer = rendererRef.current;
+      if (renderer.domElement) {
+        renderer.domElement.removeEventListener("mousedown", renderer._onMouseDown);
+        renderer.domElement.removeEventListener("mousemove", renderer._onMouseMove);
+        renderer.domElement.removeEventListener("mouseup", renderer._onMouseUp);
+        renderer.domElement.removeEventListener("mouseleave", renderer._onMouseUp);
+        renderer.domElement.removeEventListener("wheel", renderer._onWheel);
+        renderer.domElement.removeEventListener("webglcontextlost", renderer._onContextLost);
+        renderer.domElement.removeEventListener("webglcontextrestored", renderer._onContextRestored);
+      }
+      // Remove DOM element
+      if (renderer.domElement && renderer.domElement.parentNode) {
+        renderer.domElement.parentNode.removeChild(renderer.domElement);
+      }
+      // Dispose renderer
+      if (renderer.dispose) {
+        renderer.dispose();
+      }
+      rendererRef.current = null;
+    }
 
     // Cleanup previous scene
     if (sceneRef.current) {
@@ -23,9 +59,7 @@ export default function FabricVisualizer({ parameters }) {
           }
         }
       });
-    }
-    if (rendererRef.current) {
-      rendererRef.current.dispose();
+      sceneRef.current = null;
     }
 
     // Parse parameters with defaults
@@ -62,11 +96,33 @@ export default function FabricVisualizer({ parameters }) {
     cameraRef.current = camera;
 
     // Renderer
+    if (!THREE.WebGLRenderer || typeof THREE.WebGLRenderer !== 'function') {
+      console.error('THREE.WebGLRenderer is not available:', THREE);
+      return;
+    }
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    // Handle WebGL context loss
+    const onContextLost = (event) => {
+      event.preventDefault();
+      console.warn('WebGL context lost');
+    };
+
+    const onContextRestored = () => {
+      console.log('WebGL context restored');
+      // Recreate the scene if needed
+    };
+
+    renderer.domElement.addEventListener('webglcontextlost', onContextLost);
+    renderer.domElement.addEventListener('webglcontextrestored', onContextRestored);
+    
+    // Store handlers for cleanup
+    renderer._onContextLost = onContextLost;
+    renderer._onContextRestored = onContextRestored;
 
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -117,6 +173,7 @@ export default function FabricVisualizer({ parameters }) {
     const geometryToDiagonalsMap = new Map(); // Map main geometry index to diagonal Line objects array
     const geometryToCubeVerticesMap = new Map(); // Map main geometry index to original cube vertices
     const geometryToFaceXMap = new Map(); // Map main geometry index to face X Line objects array
+    const geometryToSupportSpheresMap = new Map(); // Map main geometry index to support sphere objects array
     
     // Store airflow for use in animation loop
     const storedAirflow = airflow;
@@ -590,6 +647,83 @@ export default function FabricVisualizer({ parameters }) {
           geometryToFaceXMap.set(geomIndex, faceXLines);
         }
 
+        // Add support spheres based on support parameter
+        const supportSpheres = [];
+        if (support >= 0.34) {
+          // Create sphere geometry and material
+          const sphereGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+          const smallSphereGeometry = new THREE.SphereGeometry(0.025, 8, 8);
+          const sphereMaterial = new THREE.MeshStandardMaterial({
+            color: outlineColor,
+            metalness: 0.3,
+            roughness: 0.7,
+            transparent: true,
+            opacity: baseOutlineOpacity,
+          });
+
+          if (support >= 0.34 && support < 0.66) {
+            // 50% of cube vertices (randomly select 4 out of 8)
+            const vertexIndices = [0, 1, 2, 3, 4, 5, 6, 7];
+            // Fisher-Yates shuffle for truly random selection
+            for (let i = vertexIndices.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [vertexIndices[i], vertexIndices[j]] = [vertexIndices[j], vertexIndices[i]];
+            }
+            const selectedVertices = vertexIndices.slice(0, 4);
+            
+            selectedVertices.forEach((vertexIdx) => {
+              const vertex = vertices[vertexIdx];
+              const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+              sphere.position.set(vertex.x, vertex.y, vertex.z);
+              layerGroup.add(sphere);
+              supportSpheres.push({ type: 'vertex', index: vertexIdx, sphere });
+            });
+          } else if (support >= 0.66) {
+            // All 8 cube vertices
+            vertices.forEach((vertex, vertexIdx) => {
+              const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+              sphere.position.set(vertex.x, vertex.y, vertex.z);
+              layerGroup.add(sphere);
+              supportSpheres.push({ type: 'vertex', index: vertexIdx, sphere });
+            });
+
+            // Midpoints of all 12 edges
+            // Bottom face edges (4 edges)
+            const bottomEdges = [
+              [0, 1], [1, 2], [2, 3], [3, 0]
+            ];
+            // Top face edges (4 edges)
+            const topEdges = [
+              [4, 5], [5, 6], [6, 7], [7, 4]
+            ];
+            // Vertical edges (4 edges)
+            const verticalEdges = [
+              [0, 4], [1, 5], [2, 6], [3, 7]
+            ];
+            
+            const allEdges = [...bottomEdges, ...topEdges, ...verticalEdges];
+            
+            allEdges.forEach(([startIdx, endIdx]) => {
+              const start = vertices[startIdx];
+              const end = vertices[endIdx];
+              const midpoint = new THREE.Vector3(
+                (start.x + end.x) / 2,
+                (start.y + end.y) / 2,
+                (start.z + end.z) / 2
+              );
+              const sphere = new THREE.Mesh(smallSphereGeometry, sphereMaterial);
+              sphere.position.set(midpoint.x, midpoint.y, midpoint.z);
+              layerGroup.add(sphere);
+              supportSpheres.push({ type: 'edge', startIdx, endIdx, sphere });
+            });
+          }
+        }
+        
+        // Store support spheres reference for animation
+        if (geomIndex !== -1 && supportSpheres.length > 0) {
+          geometryToSupportSpheresMap.set(geomIndex, supportSpheres);
+        }
+
       });
 
       scene.add(layerGroup);
@@ -639,6 +773,12 @@ export default function FabricVisualizer({ parameters }) {
     renderer.domElement.addEventListener("mouseup", onMouseUp);
     renderer.domElement.addEventListener("mouseleave", onMouseUp);
     renderer.domElement.addEventListener("wheel", onWheel, { passive: false });
+    
+    // Store handlers for cleanup
+    renderer._onMouseDown = onMouseDown;
+    renderer._onMouseMove = onMouseMove;
+    renderer._onMouseUp = onMouseUp;
+    renderer._onWheel = onWheel;
 
     // Animation loop
     let time = 0;
@@ -802,6 +942,34 @@ export default function FabricVisualizer({ parameters }) {
             });
           }
         }
+        
+        // Update support spheres - update positions directly
+        const supportSpheres = geometryToSupportSpheresMap.get(geomIdx);
+        if (supportSpheres) {
+          const originalVertices = geometryToCubeVerticesMap.get(geomIdx);
+          if (originalVertices) {
+            supportSpheres.forEach((sphereData) => {
+              if (sphereData.type === 'vertex') {
+                // Update vertex sphere position
+                const origVertex = originalVertices[sphereData.index];
+                const animated = getWaveOffset(origVertex.x, origVertex.y, origVertex.z);
+                sphereData.sphere.position.set(animated.x, animated.y, animated.z);
+              } else if (sphereData.type === 'edge') {
+                // Update edge midpoint sphere position
+                const origStart = originalVertices[sphereData.startIdx];
+                const origEnd = originalVertices[sphereData.endIdx];
+                const animatedStart = getWaveOffset(origStart.x, origStart.y, origStart.z);
+                const animatedEnd = getWaveOffset(origEnd.x, origEnd.y, origEnd.z);
+                const animatedMidpoint = new THREE.Vector3(
+                  (animatedStart.x + animatedEnd.x) / 2,
+                  (animatedStart.y + animatedEnd.y) / 2,
+                  (animatedStart.z + animatedEnd.z) / 2
+                );
+                sphereData.sphere.position.set(animatedMidpoint.x, animatedMidpoint.y, animatedMidpoint.z);
+              }
+            });
+          }
+        }
       });
 
       // Apply rotation
@@ -821,38 +989,79 @@ export default function FabricVisualizer({ parameters }) {
 
     // Handle resize
     const handleResize = () => {
-      if (!containerRef.current) return;
-      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      if (!containerRef.current || !cameraRef.current || !rendererRef.current) return;
+      cameraRef.current.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      cameraRef.current.updateProjectionMatrix();
+      rendererRef.current.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     };
     window.addEventListener("resize", handleResize);
+    
+    // Store handleResize for cleanup
+    renderer._handleResize = handleResize;
 
     // Cleanup
     return () => {
-      window.removeEventListener("resize", handleResize);
-      renderer.domElement.removeEventListener("mousedown", onMouseDown);
-      renderer.domElement.removeEventListener("mousemove", onMouseMove);
-      renderer.domElement.removeEventListener("mouseup", onMouseUp);
-      renderer.domElement.removeEventListener("mouseleave", onMouseUp);
-      renderer.domElement.removeEventListener("wheel", onWheel);
+      // Cancel animation frame first
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
       }
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
+      
+      // Remove window resize listener
+      if (rendererRef.current && rendererRef.current._handleResize) {
+        window.removeEventListener("resize", rendererRef.current._handleResize);
       }
-      scene.traverse((child) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          if (Array.isArray(child.material)) {
-            child.material.forEach((mat) => mat.dispose());
-          } else {
-            child.material.dispose();
-          }
+      
+      // Remove renderer event listeners if renderer still exists
+      if (rendererRef.current && rendererRef.current.domElement) {
+        const renderer = rendererRef.current;
+        if (renderer._onMouseDown) {
+          renderer.domElement.removeEventListener("mousedown", renderer._onMouseDown);
         }
-      });
-      renderer.dispose();
+        if (renderer._onMouseMove) {
+          renderer.domElement.removeEventListener("mousemove", renderer._onMouseMove);
+        }
+        if (renderer._onMouseUp) {
+          renderer.domElement.removeEventListener("mouseup", renderer._onMouseUp);
+          renderer.domElement.removeEventListener("mouseleave", renderer._onMouseUp);
+        }
+        if (renderer._onWheel) {
+          renderer.domElement.removeEventListener("wheel", renderer._onWheel);
+        }
+        if (renderer._onContextLost) {
+          renderer.domElement.removeEventListener("webglcontextlost", renderer._onContextLost);
+        }
+        if (renderer._onContextRestored) {
+          renderer.domElement.removeEventListener("webglcontextrestored", renderer._onContextRestored);
+        }
+      }
+      
+      // Cleanup scene
+      if (sceneRef.current) {
+        sceneRef.current.traverse((child) => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach((mat) => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        });
+        sceneRef.current = null;
+      }
+      
+      // Remove renderer DOM element
+      if (rendererRef.current && rendererRef.current.domElement && rendererRef.current.domElement.parentNode) {
+        rendererRef.current.domElement.parentNode.removeChild(rendererRef.current.domElement);
+      }
+      
+      // Dispose renderer if method exists
+      if (rendererRef.current && rendererRef.current.dispose) {
+        rendererRef.current.dispose();
+      }
+      
+      rendererRef.current = null;
     };
   }, [parameters]);
 
