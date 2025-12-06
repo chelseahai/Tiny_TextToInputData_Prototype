@@ -15,7 +15,7 @@ body {
 
 body {
   color: #000;
-  background: #fff;
+  background: transparent;
   font-family: 'Poppins', sans-serif;
   font-weight: 300;
   -webkit-font-smoothing: antialiased;

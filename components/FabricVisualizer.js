@@ -113,9 +113,14 @@ export default function FabricVisualizer({ parameters }) {
     // Store all geometries and their original positions for animation
     const allGeometries = [];
     const originalPositions = [];
-    const geometryToOutlineMap = new Map(); // Map main geometry index to outline LineSegments object
+    const geometryToOutlineMap = new Map(); // Map main geometry index to outline LineSegments
     const geometryToDiagonalsMap = new Map(); // Map main geometry index to diagonal Line objects array
     const geometryToCubeVerticesMap = new Map(); // Map main geometry index to original cube vertices
+    const geometryToFaceXMap = new Map(); // Map main geometry index to face X Line objects array
+    
+    // Store airflow for use in animation loop
+    const storedAirflow = airflow;
+    
 
     for (let layer = 0; layer < numLayers; layer++) {
       // Create geometry for all cubes in this layer
@@ -277,15 +282,15 @@ export default function FabricVisualizer({ parameters }) {
           // Store cube position for color gradient
           cubePositions.push({ x, z, layer });
           
+          // Store vertices for diagonal lines
+          cubeVertices.push(vertices);
+          
           // Store geometry and original positions for animation
           const geomIndex = allGeometries.length;
           allGeometries.push(geometry);
           // Store a deep copy of positions array
           originalPositions.push(new Float32Array(positions));
           geometryToCubeVerticesMap.set(geomIndex, vertices); // Store original vertices for diagonal lines
-
-          // Store vertices for diagonal lines
-          cubeVertices.push(vertices);
 
           // Create outline geometry (edges only)
           const outlineGeometry = new THREE.EdgesGeometry(geometry);
@@ -302,7 +307,9 @@ export default function FabricVisualizer({ parameters }) {
         // Give layer more weight so it has visible impact
         // x and z typically range 0-8 or more, layer is usually 0-4, so we weight layer more
         const layerWeight = Math.max(gridWidth, gridHeight); // Match the max of x or z range
-        const sum = x + z + (layer * layerWeight);
+        // Reduce xy variation by scaling down x and z contribution
+        const xyScale = 0.6; // Reduce xy variation (was 1.0)
+        const sum = (x + z) * xyScale + (layer * layerWeight);
         
         // Multiply by factor to create larger hue jumps between adjacent cubes
         const sumMultiplier = 10; // Creates more noticeable color differences
@@ -312,7 +319,25 @@ export default function FabricVisualizer({ parameters }) {
         // This way the multiplier actually creates larger jumps
         const hue = adjustedSum % 360;
         const saturation = 0.6; // Moderate saturation
-        const lightness = 0.5; // Medium lightness
+        const lightness = 0.5; // Medium lightness for cubes
+        
+        // Convert HSL to RGB
+        const color = new THREE.Color();
+        color.setHSL(hue / 360, saturation, lightness);
+        return color;
+      };
+      
+      // Helper function to get darker version of color for outlines
+      const getOutlineColor = (x, z, layer, gridWidth, gridHeight, numLayers) => {
+        // Give layer more weight so it has visible impact
+        const layerWeight = Math.max(gridWidth, gridHeight);
+        const xyScale = 0.6;
+        const sum = (x + z) * xyScale + (layer * layerWeight);
+        const sumMultiplier = 10;
+        const adjustedSum = sum * sumMultiplier;
+        const hue = adjustedSum % 360;
+        const saturation = 0.6;
+        const lightness = 0.3; // Darker lightness for outlines
         
         // Convert HSL to RGB
         const color = new THREE.Color();
@@ -320,14 +345,8 @@ export default function FabricVisualizer({ parameters }) {
         return color;
       };
 
-      // Create outline material
-      // Note: linewidth doesn't work in WebGL, so we use opacity to simulate thickness variation
-      const outlineOpacity = 0.3 + airflow * 0.7; // More airflow (0) = more transparent, Less airflow (1) = more opaque
-      const outlineMaterial = new THREE.LineBasicMaterial({
-        color: 0x222222,
-        opacity: outlineOpacity,
-        transparent: true,
-      });
+      // Outline opacity - less transparent than cubes (cubes are 0.05)
+      const baseOutlineOpacity = 0.5 + airflow * 0.4;
 
       // Create a group for this layer to apply scale
       const layerGroup = new THREE.Group();
@@ -352,12 +371,19 @@ export default function FabricVisualizer({ parameters }) {
         const mesh = new THREE.Mesh(geom, cubeMaterial);
         layerGroup.add(mesh);
 
-        // Create outline
+        // Create outline as simple lines with darker version of cube color
         const outlineGeom = outlineGeometries[idx];
+        // Use darker version of the cube color for outlines
+        const outlineColor = getOutlineColor(cubePos.x, cubePos.z, cubePos.layer, gridWidth, gridHeight, numLayers);
+        const outlineMaterial = new THREE.LineBasicMaterial({
+          color: outlineColor,
+          opacity: baseOutlineOpacity,
+          transparent: true,
+        });
         const outline = new THREE.LineSegments(outlineGeom, outlineMaterial);
         layerGroup.add(outline);
         
-        // Store outline reference for animation (find the geometry index in allGeometries)
+        // Store outline references for animation
         const geomIndex = allGeometries.indexOf(geom);
         if (geomIndex !== -1) {
           geometryToOutlineMap.set(geomIndex, outline);
@@ -404,6 +430,166 @@ export default function FabricVisualizer({ parameters }) {
         if (geomIndex !== -1 && diagonalLines.length > 0) {
           geometryToDiagonalsMap.set(geomIndex, diagonalLines);
         }
+
+        // Add face X patterns based on airflow
+        const faceXLines = [];
+        if (airflow >= 0.34 && airflow < 0.67) {
+          // X pattern on top and bottom faces only
+          // Bottom face: vertices 0, 1, 2, 3
+          // Top face: vertices 4, 5, 6, 7
+          const bottomX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[0].x, vertices[0].y, vertices[0].z),
+              new THREE.Vector3(vertices[2].x, vertices[2].y, vertices[2].z)
+            ]),
+            outlineMaterial
+          );
+          const bottomX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[1].x, vertices[1].y, vertices[1].z),
+              new THREE.Vector3(vertices[3].x, vertices[3].y, vertices[3].z)
+            ]),
+            outlineMaterial
+          );
+          const topX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[4].x, vertices[4].y, vertices[4].z),
+              new THREE.Vector3(vertices[6].x, vertices[6].y, vertices[6].z)
+            ]),
+            outlineMaterial
+          );
+          const topX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[5].x, vertices[5].y, vertices[5].z),
+              new THREE.Vector3(vertices[7].x, vertices[7].y, vertices[7].z)
+            ]),
+            outlineMaterial
+          );
+          layerGroup.add(bottomX1);
+          layerGroup.add(bottomX2);
+          layerGroup.add(topX1);
+          layerGroup.add(topX2);
+          faceXLines.push({ face: 'bottom', lines: [bottomX1, bottomX2] });
+          faceXLines.push({ face: 'top', lines: [topX1, topX2] });
+        } else if (airflow >= 0.67) {
+          // X pattern on all 6 faces
+          // Bottom face: 0→2, 1→3
+          const bottomX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[0].x, vertices[0].y, vertices[0].z),
+              new THREE.Vector3(vertices[2].x, vertices[2].y, vertices[2].z)
+            ]),
+            outlineMaterial
+          );
+          const bottomX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[1].x, vertices[1].y, vertices[1].z),
+              new THREE.Vector3(vertices[3].x, vertices[3].y, vertices[3].z)
+            ]),
+            outlineMaterial
+          );
+          // Top face: 4→6, 5→7
+          const topX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[4].x, vertices[4].y, vertices[4].z),
+              new THREE.Vector3(vertices[6].x, vertices[6].y, vertices[6].z)
+            ]),
+            outlineMaterial
+          );
+          const topX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[5].x, vertices[5].y, vertices[5].z),
+              new THREE.Vector3(vertices[7].x, vertices[7].y, vertices[7].z)
+            ]),
+            outlineMaterial
+          );
+          // Front face: 0→5, 1→4
+          const frontX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[0].x, vertices[0].y, vertices[0].z),
+              new THREE.Vector3(vertices[5].x, vertices[5].y, vertices[5].z)
+            ]),
+            outlineMaterial
+          );
+          const frontX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[1].x, vertices[1].y, vertices[1].z),
+              new THREE.Vector3(vertices[4].x, vertices[4].y, vertices[4].z)
+            ]),
+            outlineMaterial
+          );
+          // Back face: 2→7, 3→6
+          const backX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[2].x, vertices[2].y, vertices[2].z),
+              new THREE.Vector3(vertices[7].x, vertices[7].y, vertices[7].z)
+            ]),
+            outlineMaterial
+          );
+          const backX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[3].x, vertices[3].y, vertices[3].z),
+              new THREE.Vector3(vertices[6].x, vertices[6].y, vertices[6].z)
+            ]),
+            outlineMaterial
+          );
+          // Right face: 1→6, 2→5
+          const rightX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[1].x, vertices[1].y, vertices[1].z),
+              new THREE.Vector3(vertices[6].x, vertices[6].y, vertices[6].z)
+            ]),
+            outlineMaterial
+          );
+          const rightX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[2].x, vertices[2].y, vertices[2].z),
+              new THREE.Vector3(vertices[5].x, vertices[5].y, vertices[5].z)
+            ]),
+            outlineMaterial
+          );
+          // Left face: 3→4, 0→7
+          const leftX1 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[3].x, vertices[3].y, vertices[3].z),
+              new THREE.Vector3(vertices[4].x, vertices[4].y, vertices[4].z)
+            ]),
+            outlineMaterial
+          );
+          const leftX2 = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([
+              new THREE.Vector3(vertices[0].x, vertices[0].y, vertices[0].z),
+              new THREE.Vector3(vertices[7].x, vertices[7].y, vertices[7].z)
+            ]),
+            outlineMaterial
+          );
+          
+          layerGroup.add(bottomX1);
+          layerGroup.add(bottomX2);
+          layerGroup.add(topX1);
+          layerGroup.add(topX2);
+          layerGroup.add(frontX1);
+          layerGroup.add(frontX2);
+          layerGroup.add(backX1);
+          layerGroup.add(backX2);
+          layerGroup.add(rightX1);
+          layerGroup.add(rightX2);
+          layerGroup.add(leftX1);
+          layerGroup.add(leftX2);
+          
+          faceXLines.push({ face: 'bottom', lines: [bottomX1, bottomX2] });
+          faceXLines.push({ face: 'top', lines: [topX1, topX2] });
+          faceXLines.push({ face: 'front', lines: [frontX1, frontX2] });
+          faceXLines.push({ face: 'back', lines: [backX1, backX2] });
+          faceXLines.push({ face: 'right', lines: [rightX1, rightX2] });
+          faceXLines.push({ face: 'left', lines: [leftX1, leftX2] });
+        }
+        
+        // Store face X lines reference for animation
+        if (geomIndex !== -1 && faceXLines.length > 0) {
+          geometryToFaceXMap.set(geomIndex, faceXLines);
+        }
+
       });
 
       scene.add(layerGroup);
@@ -533,18 +719,14 @@ export default function FabricVisualizer({ parameters }) {
         geometry.computeVertexNormals(); // Recalculate normals for proper lighting
         
         // Update outline geometry (recreate EdgesGeometry from animated geometry)
-        // Note: We recreate every frame to match the animation speed of the cubes
         const outline = geometryToOutlineMap.get(geomIdx);
         if (outline) {
-          // Dispose old geometry
           const oldGeometry = outline.geometry;
-          // Create new EdgesGeometry from animated geometry
           outline.geometry = new THREE.EdgesGeometry(geometry);
-          // Dispose old geometry after creating new one to avoid flicker
-          oldGeometry.dispose();
+          if (oldGeometry) oldGeometry.dispose();
         }
         
-        // Update diagonal lines - update positions directly instead of recreating
+        // Update diagonal lines - update positions directly
         const diagonalLines = geometryToDiagonalsMap.get(geomIdx);
         if (diagonalLines) {
           const originalVertices = geometryToCubeVerticesMap.get(geomIdx);
@@ -564,7 +746,7 @@ export default function FabricVisualizer({ parameters }) {
               const animatedStart = getWaveOffset(origStart.x, origStart.y, origStart.z);
               const animatedEnd = getWaveOffset(origEnd.x, origEnd.y, origEnd.z);
               
-              // Update position array directly instead of recreating geometry
+              // Update line position
               const linePositions = line.geometry.attributes.position;
               if (linePositions) {
                 linePositions.array[0] = animatedStart.x;
@@ -575,6 +757,48 @@ export default function FabricVisualizer({ parameters }) {
                 linePositions.array[5] = animatedEnd.z;
                 linePositions.needsUpdate = true;
               }
+            });
+          }
+        }
+        
+        // Update face X lines - update positions directly
+        const faceXLines = geometryToFaceXMap.get(geomIdx);
+        if (faceXLines) {
+          const originalVertices = geometryToCubeVerticesMap.get(geomIdx);
+          if (originalVertices) {
+            // Define vertex pairs for each face X pattern
+            const faceVertexPairs = {
+              bottom: [[0, 2], [1, 3]],
+              top: [[4, 6], [5, 7]],
+              front: [[0, 5], [1, 4]],
+              back: [[2, 7], [3, 6]],
+              right: [[1, 6], [2, 5]],
+              left: [[3, 4], [0, 7]]
+            };
+            
+            faceXLines.forEach((faceX) => {
+              const pairs = faceVertexPairs[faceX.face];
+              faceX.lines.forEach((line, lineIdx) => {
+                const [startIdx, endIdx] = pairs[lineIdx];
+                const origStart = originalVertices[startIdx];
+                const origEnd = originalVertices[endIdx];
+                
+                // Calculate animated positions
+                const animatedStart = getWaveOffset(origStart.x, origStart.y, origStart.z);
+                const animatedEnd = getWaveOffset(origEnd.x, origEnd.y, origEnd.z);
+                
+                // Update line position
+                const linePositions = line.geometry.attributes.position;
+                if (linePositions) {
+                  linePositions.array[0] = animatedStart.x;
+                  linePositions.array[1] = animatedStart.y;
+                  linePositions.array[2] = animatedStart.z;
+                  linePositions.array[3] = animatedEnd.x;
+                  linePositions.array[4] = animatedEnd.y;
+                  linePositions.array[5] = animatedEnd.z;
+                  linePositions.needsUpdate = true;
+                }
+              });
             });
           }
         }
@@ -636,10 +860,11 @@ export default function FabricVisualizer({ parameters }) {
     <div
       ref={containerRef}
       style={{
-        width: "100%",
-        maxWidth: "100%",
-        height: "100%",
-        maxHeight: "100%",
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100vw",
+        height: "100vh",
         overflow: "hidden",
         background: "transparent",
       }}
