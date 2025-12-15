@@ -1,5 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // GitHub Pages configuration
+  basePath: process.env.NODE_ENV === 'production' ? '/Tiny_TextToInputData_Prototype' : '',
+  assetPrefix: process.env.NODE_ENV === 'production' ? '/Tiny_TextToInputData_Prototype' : '',
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

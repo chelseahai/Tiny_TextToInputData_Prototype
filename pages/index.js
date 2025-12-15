@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
 import dynamic from "next/dynamic";
 
@@ -7,12 +7,22 @@ const FabricVisualizer = dynamic(() => import("../components/FabricVisualizer"),
   loading: () => <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 300 }}>Loading visualization...</div>
 });
 
+// Dynamically import client-side API (only if needed for GitHub Pages)
+let analyzeTextClientSide = null;
+if (typeof window !== 'undefined') {
+  import('../lib/openai-client').then(module => {
+    analyzeTextClientSide = module.analyzeTextClientSide;
+  }).catch(() => {
+    // Client-side module not available
+  });
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e) {
+  const handleSubmit = useCallback(async (e) => {
     if (e) e.preventDefault();
     if (!input.trim()) return;
     
@@ -20,6 +30,7 @@ export default function Home() {
     setResult(null);
 
     try {
+      // Try server-side API route first (works on Vercel/local)
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -27,6 +38,21 @@ export default function Home() {
       });
 
       if (!res.ok) {
+        // If API route doesn't exist (GitHub Pages), try client-side
+        if (res.status === 404 && typeof window !== 'undefined') {
+          const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+          if (apiKey && analyzeTextClientSide) {
+            const data = await analyzeTextClientSide(input, apiKey);
+            setResult(data);
+            setLoading(false);
+            return;
+          } else if (!apiKey) {
+            alert("API route not available. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment, or deploy to Vercel for server-side API routes.");
+            setLoading(false);
+            return;
+          }
+        }
+        
         const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
         console.error("API Error:", errorData);
         alert(`Error: ${errorData.error || "Failed to analyze"}`);
@@ -37,12 +63,34 @@ export default function Home() {
       const data = await res.json();
       setResult(data);
     } catch (error) {
+      // Network error - try client-side fallback for GitHub Pages
+      if (typeof window !== 'undefined' && error.message.includes('Failed to fetch')) {
+        const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+        if (apiKey && analyzeTextClientSide) {
+          try {
+            const data = await analyzeTextClientSide(input, apiKey);
+            setResult(data);
+            setLoading(false);
+            return;
+          } catch (clientError) {
+            console.error("Client-side API Error:", clientError);
+            alert(`Error: ${clientError.message || "Failed to analyze"}`);
+            setLoading(false);
+            return;
+          }
+        } else if (!apiKey) {
+          alert("API route not available. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment, or deploy to Vercel for server-side API routes.");
+          setLoading(false);
+          return;
+        }
+      }
+      
       console.error("Fetch Error:", error);
       alert(`Error: ${error.message || "Failed to connect to server"}`);
     } finally {
       setLoading(false);
     }
-  }
+  }, [input]);
 
   // Keyboard shortcut: Enter to analyze
   useEffect(() => {
@@ -51,37 +99,13 @@ export default function Home() {
         e.preventDefault();
         if (!input.trim() || loading) return;
         
-        setLoading(true);
-        setResult(null);
-
-        try {
-          const res = await fetch("/api/analyze", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: input }),
-          });
-
-          if (!res.ok) {
-            const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
-            console.error("API Error:", errorData);
-            alert(`Error: ${errorData.error || "Failed to analyze"}`);
-            setLoading(false);
-            return;
-          }
-
-          const data = await res.json();
-          setResult(data);
-        } catch (error) {
-          console.error("Fetch Error:", error);
-          alert(`Error: ${error.message || "Failed to connect to server"}`);
-        } finally {
-          setLoading(false);
-        }
+        // Reuse the same handleSubmit logic
+        handleSubmit(e);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [input, loading]);
+  }, [input, loading, handleSubmit]);
 
   return (
     <>
