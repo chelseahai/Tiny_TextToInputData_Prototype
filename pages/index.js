@@ -52,8 +52,52 @@ export default function Home() {
     setLoading(true);
     setResult(null);
 
+    // Detect if we're on GitHub Pages (static export) - API routes don't work there
+    const isGitHubPages = typeof window !== 'undefined' && 
+      window.location.hostname.includes('github.io');
+    
+    // Check if client-side API key is available (indicates GitHub Pages build)
+    const hasClientSideKey = typeof window !== 'undefined' && 
+      process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+
     try {
-      // Try server-side API route first (works on Vercel/local)
+      // If on GitHub Pages or client-side key is available, use client-side directly
+      // This avoids the 405 error from trying the API route
+      if (isGitHubPages || hasClientSideKey) {
+        // Wait for client-side module to load if not ready
+        if (!analyzeTextClientSide) {
+          try {
+            const module = await import('../lib/openai-client');
+            analyzeTextClientSide = module.analyzeTextClientSide;
+          } catch (err) {
+            console.error("Failed to load client-side API:", err);
+            alert("Failed to load client-side API module.");
+            setLoading(false);
+            return;
+          }
+        }
+        
+        const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
+        if (apiKey && analyzeTextClientSide) {
+          try {
+            const data = await analyzeTextClientSide(input, apiKey);
+            setResult(data);
+            setLoading(false);
+            return;
+          } catch (clientError) {
+            console.error("Client-side API Error:", clientError);
+            alert(`Error: ${clientError.message || "Failed to analyze"}`);
+            setLoading(false);
+            return;
+          }
+        } else {
+          alert("API key not configured. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment.");
+          setLoading(false);
+          return;
+        }
+      }
+
+      // For local/Vercel deployment, try server-side API route
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -61,9 +105,8 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        // If API route doesn't exist (GitHub Pages returns 404 or 405), try client-side
-        if ((res.status === 404 || res.status === 405) && typeof window !== 'undefined') {
-          // Wait for client-side module to load if not ready
+        // If API route fails, try client-side as fallback
+        if (typeof window !== 'undefined') {
           if (!analyzeTextClientSide) {
             try {
               const module = await import('../lib/openai-client');
@@ -82,18 +125,11 @@ export default function Home() {
               return;
             } catch (clientError) {
               console.error("Client-side API Error:", clientError);
-              alert(`Error: ${clientError.message || "Failed to analyze"}`);
-              setLoading(false);
-              return;
             }
-          } else if (!apiKey) {
-            alert("API route not available. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment, or deploy to Vercel for server-side API routes.");
-            setLoading(false);
-            return;
           }
         }
         
-        // For other errors, try to get error message
+        // If fallback also failed, show error
         const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
         console.error("API Error:", errorData);
         alert(`Error: ${errorData.error || "Failed to analyze"}`);
@@ -104,9 +140,8 @@ export default function Home() {
       const data = await res.json();
       setResult(data);
     } catch (error) {
-      // Network error or CORS error - try client-side fallback for GitHub Pages
-      if (typeof window !== 'undefined' && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
-        // Wait for client-side module to load if not ready
+      // Network error - try client-side fallback
+      if (typeof window !== 'undefined') {
         if (!analyzeTextClientSide) {
           try {
             const module = await import('../lib/openai-client');
@@ -129,10 +164,6 @@ export default function Home() {
             setLoading(false);
             return;
           }
-        } else if (!apiKey) {
-          alert("API route not available. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment, or deploy to Vercel for server-side API routes.");
-          setLoading(false);
-          return;
         }
       }
       
