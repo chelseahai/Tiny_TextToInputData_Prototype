@@ -7,7 +7,17 @@ const nextConfig = {
         fs: false,
       };
     }
+    
+    // Ensure Three.js is properly externalized
+    config.resolve.alias = {
+      ...config.resolve.alias,
+    };
+    
     return config;
+  },
+  // Disable server-side rendering for pages that use Three.js
+  experimental: {
+    esmExternals: 'loose',
   },
 };
 

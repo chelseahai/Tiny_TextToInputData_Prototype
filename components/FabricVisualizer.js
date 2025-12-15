@@ -1,5 +1,4 @@
-import { useEffect, useRef } from "react";
-import * as THREE from "three";
+import { useEffect, useRef, useState } from "react";
 
 export default function FabricVisualizer({ parameters }) {
   const containerRef = useRef(null);
@@ -7,13 +6,64 @@ export default function FabricVisualizer({ parameters }) {
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
   const animationFrameRef = useRef(null);
+  const [isReady, setIsReady] = useState(false);
+  const [webglError, setWebglError] = useState(null);
+
+  // Load Three.js dynamically
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    import('three').then((module) => {
+      const THREE_Module = module.default || module;
+      window.__THREE__ = THREE_Module;
+      setIsReady(true);
+    }).catch((err) => {
+      console.error('Failed to load Three.js:', err);
+    });
+  }, []);
 
   useEffect(() => {
-    if (!containerRef.current || !parameters || typeof window === 'undefined') return;
+    if (!containerRef.current || !parameters || typeof window === 'undefined' || !isReady || !window.__THREE__) {
+      if (!containerRef.current) console.log('Waiting for container');
+      if (!parameters) console.log('Waiting for parameters');
+      if (!isReady) console.log('Waiting for THREE.js to load');
+      if (!window.__THREE__) console.log('THREE not in window');
+      return;
+    }
     
-    // Ensure THREE is available
-    if (!THREE || !THREE.WebGLRenderer) {
-      console.error('Three.js is not properly loaded');
+    const THREE = window.__THREE__;
+    
+    // Double-check THREE is available
+    if (!THREE) {
+      console.error('THREE is undefined');
+      return;
+    }
+    
+    if (!THREE.WebGLRenderer) {
+      console.error('THREE.WebGLRenderer is missing');
+      return;
+    }
+    
+    if (typeof THREE.WebGLRenderer !== 'function') {
+      console.error('THREE.WebGLRenderer is not a function, type:', typeof THREE.WebGLRenderer, 'THREE:', THREE);
+      return;
+    }
+
+    // Check container dimensions
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+    console.log('Container dimensions:', containerWidth, 'x', containerHeight);
+    
+    if (containerWidth === 0 || containerHeight === 0) {
+      console.warn('Container has zero dimensions, waiting...');
+      // Retry after a short delay
+      setTimeout(() => {
+        if (containerRef.current) {
+          const retryWidth = containerRef.current.clientWidth;
+          const retryHeight = containerRef.current.clientHeight;
+          console.log('Retry container dimensions:', retryWidth, 'x', retryHeight);
+        }
+      }, 100);
       return;
     }
 
@@ -96,15 +146,58 @@ export default function FabricVisualizer({ parameters }) {
     cameraRef.current = camera;
 
     // Renderer
-    if (!THREE.WebGLRenderer || typeof THREE.WebGLRenderer !== 'function') {
-      console.error('THREE.WebGLRenderer is not available:', THREE);
+    let renderer;
+    try {
+      if (!THREE.WebGLRenderer || typeof THREE.WebGLRenderer !== 'function') {
+        console.error('THREE.WebGLRenderer is not available. THREE:', THREE);
+        console.error('THREE type:', typeof THREE);
+        console.error('THREE keys:', THREE ? Object.keys(THREE).slice(0, 20) : 'THREE is null/undefined');
+        return;
+      }
+      renderer = new THREE.WebGLRenderer({ 
+        antialias: true, 
+        alpha: true,
+        powerPreference: "high-performance",
+        failIfMajorPerformanceCaveat: false
+      });
+      
+      // Check if WebGL context was actually created
+      const gl = renderer.getContext();
+      if (!gl) {
+        console.error('WebGL context was not created');
+        setWebglError('WebGL context could not be created. Please check your browser settings.');
+        return;
+      }
+    } catch (err) {
+      console.error('Error creating WebGLRenderer:', err);
+      console.error('Error message:', err?.message);
+      console.error('THREE object:', THREE);
+      console.error('THREE.WebGLRenderer:', THREE?.WebGLRenderer);
+      setWebglError(`WebGL Error: ${err?.message || 'Unknown error'}`);
       return;
     }
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    
+    if (!renderer) {
+      console.error('Renderer is null after creation attempt');
+      setWebglError('Failed to create WebGL renderer');
+      return;
+    }
+    
+    // Clear any previous error
+    setWebglError(null);
+    
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio
+    
+    // Ensure canvas is visible
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
+    
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    
+    console.log('Renderer created and canvas added to DOM. Canvas size:', renderer.domElement.width, 'x', renderer.domElement.height);
 
     // Handle WebGL context loss
     const onContextLost = (event) => {
@@ -727,7 +820,10 @@ export default function FabricVisualizer({ parameters }) {
       });
 
       scene.add(layerGroup);
+      console.log(`Layer ${layer} added with ${geometries.length} cubes`);
     }
+    
+    console.log('Total scene children:', scene.children.length, 'Total geometries:', allGeometries.length);
 
     // Add controls for rotation and zoom
     let mouseDown = false;
@@ -972,6 +1068,11 @@ export default function FabricVisualizer({ parameters }) {
         }
       });
 
+      // Check if renderer is still valid
+      if (!renderer || !renderer.getContext()) {
+        return;
+      }
+
       // Apply rotation
       scene.rotation.y = rotationY;
       scene.rotation.x = rotationX;
@@ -985,6 +1086,8 @@ export default function FabricVisualizer({ parameters }) {
 
       renderer.render(scene, camera);
     };
+    
+    console.log('Starting animation loop. Scene children:', scene.children.length, 'Geometries:', allGeometries.length);
     animate();
 
     // Handle resize
@@ -1063,7 +1166,58 @@ export default function FabricVisualizer({ parameters }) {
       
       rendererRef.current = null;
     };
-  }, [parameters]);
+  }, [parameters, isReady]);
+
+  if (!isReady) {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          color: "#ccc",
+          fontSize: "14px",
+          fontWeight: 300,
+        }}
+      >
+        Loading Three.js...
+      </div>
+    );
+  }
+
+  if (webglError) {
+    return (
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100vw",
+          height: "100vh",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          alignItems: "center",
+          color: "#999",
+          fontSize: "14px",
+          fontWeight: 300,
+          padding: "20px",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ marginBottom: "10px" }}>⚠️ WebGL Not Available</div>
+        <div style={{ fontSize: "12px", maxWidth: "400px" }}>{webglError}</div>
+        <div style={{ fontSize: "11px", marginTop: "10px", color: "#666" }}>
+          Please enable WebGL in your browser settings or try a different browser.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

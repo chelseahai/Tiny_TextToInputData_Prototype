@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import Head from "next/head";
-import FabricVisualizer from "../components/FabricVisualizer";
+import dynamic from "next/dynamic";
+
+const FabricVisualizer = dynamic(() => import("../components/FabricVisualizer"), {
+  ssr: false,
+  loading: () => <div style={{ color: "#ccc", fontSize: "14px", fontWeight: 300 }}>Loading visualization...</div>
+});
 
 export default function Home() {
   const [input, setInput] = useState("");
