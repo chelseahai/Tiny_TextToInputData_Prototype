@@ -9,11 +9,16 @@ const FabricVisualizer = dynamic(() => import("../components/FabricVisualizer"),
 
 // Dynamically import client-side API (only if needed for GitHub Pages)
 let analyzeTextClientSide = null;
+let clientSideModulePromise = null;
+
+// Preload the client-side module
 if (typeof window !== 'undefined') {
-  import('../lib/openai-client').then(module => {
+  clientSideModulePromise = import('../lib/openai-client').then(module => {
     analyzeTextClientSide = module.analyzeTextClientSide;
-  }).catch(() => {
-    // Client-side module not available
+    return module.analyzeTextClientSide;
+  }).catch((err) => {
+    console.error("Failed to load client-side API module:", err);
+    return null;
   });
 }
 
@@ -56,14 +61,31 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        // If API route doesn't exist (GitHub Pages), try client-side
-        if (res.status === 404 && typeof window !== 'undefined') {
+        // If API route doesn't exist (GitHub Pages returns 404 or 405), try client-side
+        if ((res.status === 404 || res.status === 405) && typeof window !== 'undefined') {
+          // Wait for client-side module to load if not ready
+          if (!analyzeTextClientSide) {
+            try {
+              const module = await import('../lib/openai-client');
+              analyzeTextClientSide = module.analyzeTextClientSide;
+            } catch (err) {
+              console.error("Failed to load client-side API:", err);
+            }
+          }
+          
           const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
           if (apiKey && analyzeTextClientSide) {
-            const data = await analyzeTextClientSide(input, apiKey);
-            setResult(data);
-            setLoading(false);
-            return;
+            try {
+              const data = await analyzeTextClientSide(input, apiKey);
+              setResult(data);
+              setLoading(false);
+              return;
+            } catch (clientError) {
+              console.error("Client-side API Error:", clientError);
+              alert(`Error: ${clientError.message || "Failed to analyze"}`);
+              setLoading(false);
+              return;
+            }
           } else if (!apiKey) {
             alert("API route not available. Please set NEXT_PUBLIC_OPENAI_API_KEY for GitHub Pages deployment, or deploy to Vercel for server-side API routes.");
             setLoading(false);
@@ -71,6 +93,7 @@ export default function Home() {
           }
         }
         
+        // For other errors, try to get error message
         const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
         console.error("API Error:", errorData);
         alert(`Error: ${errorData.error || "Failed to analyze"}`);
@@ -81,8 +104,18 @@ export default function Home() {
       const data = await res.json();
       setResult(data);
     } catch (error) {
-      // Network error - try client-side fallback for GitHub Pages
-      if (typeof window !== 'undefined' && error.message.includes('Failed to fetch')) {
+      // Network error or CORS error - try client-side fallback for GitHub Pages
+      if (typeof window !== 'undefined' && (error.message.includes('Failed to fetch') || error.message.includes('NetworkError'))) {
+        // Wait for client-side module to load if not ready
+        if (!analyzeTextClientSide) {
+          try {
+            const module = await import('../lib/openai-client');
+            analyzeTextClientSide = module.analyzeTextClientSide;
+          } catch (err) {
+            console.error("Failed to load client-side API:", err);
+          }
+        }
+        
         const apiKey = process.env.NEXT_PUBLIC_OPENAI_API_KEY;
         if (apiKey && analyzeTextClientSide) {
           try {
@@ -131,6 +164,7 @@ export default function Home() {
         <title>What are you doing for today?</title>
         <meta name="description" content="Convert natural language descriptions into garment parameters" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧵</text></svg>" />
       </Head>
       <main style={{ 
         height: "100vh", 
